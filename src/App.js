@@ -1,56 +1,62 @@
 import './App.css';
-import {useRef,useState,useEffect} from 'react';
+import { useRef, useState, useEffect } from 'react';
 
 function App() {
-  let offerRef = useRef(null);
-  let answerRef = useRef(null);
-  let videoRef = useRef(null);
   let pcRef = useRef(null);
-  let [isChecked,setIsChecked] = useState(false);
+  let [connectionMade, setConnectionMade] = useState(false);
 
-  let acceptOffer = async () => {
-    if(pcRef.current)
+  async function run() {
+    if (pcRef.current)
       pcRef.current.close();
     let pc = new RTCPeerConnection();
-    if(isChecked)
-    {
-      pc.addTrack((await navigator.mediaDevices.getDisplayMedia({video:true,audio:false})).getVideoTracks()[0])
-
+    let dc = pc.createDataChannel("my data channel")
+    dc.onopen = (ev) => {
+      console.log(ev)
+      dc.send("hello world!");
     }
-    else 
-    {
-      pc.ontrack = (e)=>{
-        videoRef.current.srcObject = e.streams[0];
-      }
+    dc.onmessage = (ev) => {
+      console.log(ev)
     }
     try {
-    let offer = JSON.parse(offerRef.current.value);
-    await pc.setRemoteDescription(offer);
-    let answer = await pc.createAnswer()
-    pc.setLocalDescription(answer)
-    answerRef.current.value = JSON.stringify(answer)
-    pcRef.current = pc;
-    } catch(err) {
+      pc.onicegatheringstatechange = async (ev) => {
+        console.log(pc.iceGatheringState)
+        if (pc.iceGatheringState == "complete") {
+          let response = await fetch("http://127.0.0.1:8080/", {
+            method: "POST",
+            body: JSON.stringify(pc.localDescription)
+          })
+          let answer = await response.json()
+          pc.setRemoteDescription(answer)
+          pcRef.current = pc;
+        }
+      }
+      pc.oniceconnectionstatechange = (ev) => {
+        console.log(pc.iceConnectionState)
+        if (pc.iceConnectionState == "connected") {
+          setConnectionMade(true);
+        }
+      }
+      let offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+    } catch (err) {
       console.error(err);
     }
   }
-  useEffect(()=>{
+  useEffect(() => {
     console.log("page loaded");
-    return ()=>{
+    return () => {
       if (pcRef.current)
         pcRef.current.close();
     }
-  },[]);
+  }, []);
   return (
     <div className="App">
-      <textarea ref={offerRef} defaultValue={"offer json"}></textarea>
-      <textarea ref={answerRef} defaultValue={"answer json"} readOnly></textarea>
-      <button onClick={()=>acceptOffer()}>accept offer</button>
+      <button onClick={() => run()}>connect</button>
       <div>
-      <input type='checkbox' onChange={()=>setIsChecked((prev)=>!prev)}/>
-      <p>publish?</p>
+        <input type='checkbox' checked={connectionMade} />
+        <p>connected?</p>
       </div>
-      <video autoPlay controls muted ref={videoRef} />
     </div>
   );
 }
